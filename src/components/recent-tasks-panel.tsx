@@ -12,6 +12,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import { parseJsonResponse } from "@/lib/http";
 import type { LocalTaskStatus, PublicTask } from "@/lib/types";
 
 const statusMap: Record<
@@ -84,7 +85,9 @@ export function RecentTasksPanel() {
       const response = await fetch("/api/tasks?limit=6&refresh=true", {
         cache: "no-store",
       });
-      const payload = (await response.json()) as
+      const payload = (await parseJsonResponse<{
+        tasks: PublicTask[];
+      }>(response)) as
         | { tasks: PublicTask[] }
         | { error: string };
 

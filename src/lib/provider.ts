@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { parseJsonResponse } from "@/lib/http";
 import type {
   LocalTaskStatus,
   OutputFormat,
@@ -10,6 +11,18 @@ import type {
 import { clamp } from "@/lib/utils";
 
 const SUPPORTED_FORMATS: OutputFormat[] = ["glb", "fbx", "obj", "stl", "usdz"];
+
+const meshyApiOrigin = env.meshyApiBaseUrl
+  .replace(/\/openapi\/v\d+\/?$/, "")
+  .replace(/\/$/, "");
+
+function buildMeshyUrl(pathname: string) {
+  if (/^https?:\/\//.test(pathname)) {
+    return pathname;
+  }
+
+  return `${meshyApiOrigin}${pathname}`;
+}
 
 function statusFromRemoteStatus(status: string): LocalTaskStatus {
   switch (status.toUpperCase()) {
@@ -47,29 +60,29 @@ function buildStage(
 ) {
   if (status === "queued") {
     return inputMode === "text"
-      ? "任务已创建，等待生成 3D 草模"
-      : "任务已创建，等待第三方服务处理";
+      ? "Task created. Waiting to generate 3D preview."
+      : "Task created. Waiting for Meshy processing.";
   }
 
   if (status === "processing") {
     if (inputMode === "text" && flow === "text-preview") {
-      if (progress < 45) return "正在根据文字生成 3D 草模";
-      return "正在整理预览模型";
+      if (progress < 45) return "Generating 3D preview from text prompt.";
+      return "Please enter a text prompt.";
     }
 
     if (inputMode === "text" && flow === "text-refine") {
-      if (progress < 55) return "正在细化网格与结构";
-      return "正在烘焙材质与导出模型";
+      if (progress < 55) return "Refining mesh and structure.";
+      return "Baking materials and exporting model.";
     }
 
-    if (progress < 35) return "正在分析输入内容";
-    if (progress < 72) return "正在生成几何网格";
-    return "正在整理纹理与导出模型";
+    if (progress < 35) return "Please enter a text prompt.";
+    if (progress < 72) return "Please enter a text prompt.";
+    return "Baking materials and exporting model.";
   }
 
-  if (status === "succeeded") return "模型已生成，可以预览与下载";
-  if (status === "timeout") return "任务超时，请稍后重试";
-  return "生成失败，请调整参数后重试";
+  if (status === "succeeded") return "Model is ready for preview and download.";
+  if (status === "timeout") return "Third-party model generation failed.";
+  return "Model is ready for preview and download.";
 }
 
 function extractModelUrls(data: Record<string, unknown>): TaskResultAssets {
@@ -109,7 +122,7 @@ async function fetchMeshy(pathname: string, init: RequestInit) {
   const timeout = setTimeout(() => controller.abort(), env.providerRequestTimeoutMs);
 
   try {
-    const response = await fetch(`${env.meshyApiBaseUrl}${pathname}`, {
+    const response = await fetch(buildMeshyUrl(pathname), {
       ...init,
       cache: "no-store",
       signal: controller.signal,
@@ -120,20 +133,28 @@ async function fetchMeshy(pathname: string, init: RequestInit) {
       },
     });
 
-    const data = (await response.json()) as Record<string, unknown>;
+    const data = (await parseJsonResponse<Record<string, unknown>>(
+      response,
+    )) as Record<string, unknown> | { error: string };
 
     if (!response.ok) {
-      const message =
-        typeof data.message === "string"
+      const responseMessage =
+        "message" in data && typeof data.message === "string"
           ? data.message
-          : "第三方 AI 服务返回异常。";
-      throw new Error(message);
+          : null;
+      const responseError =
+        "error" in data && typeof data.error === "string" ? data.error : null;
+      throw new Error(responseMessage ?? responseError ?? "Third-party AI service returned an unexpected response.");
+    }
+
+    if ("error" in data) {
+      throw new Error(typeof data.error === "string" ? data.error : "Request failed.");
     }
 
     return data;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("调用第三方 AI 服务超时，请稍后重试。");
+      throw new Error("Third-party AI request timed out. Please try again later.");
     }
 
     throw error;
@@ -174,7 +195,7 @@ async function createMeshyImageTask(
     body.texture_prompt = input.settings.texturePrompt.trim();
   }
 
-  const data = await fetchMeshy("/image-to-3d", {
+  const data = await fetchMeshy("/openapi/v1/image-to-3d", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -182,7 +203,7 @@ async function createMeshyImageTask(
   const providerTaskId = extractTaskId(data);
 
   if (!providerTaskId) {
-    throw new Error("第三方 AI 服务未返回任务 ID。");
+    throw new Error("Third-party AI service did not return a task ID.");
   }
 
   return {
@@ -191,7 +212,7 @@ async function createMeshyImageTask(
     providerTaskFlow: "image-to-3d",
     status: "queued",
     progress: 8,
-    stage: "任务已提交到 Meshy，等待处理",
+    stage: "Task submitted to Meshy. Waiting for processing.",
   };
 }
 
@@ -200,17 +221,19 @@ async function createMeshyTextTask(
 ): Promise<ProviderSyncResult> {
   const prompt = input.prompt?.trim();
   if (!prompt) {
-    throw new Error("请输入文字描述。");
+    throw new Error("Please enter a text prompt.");
   }
 
   const body: Record<string, unknown> = {
+    mode: "preview",
     prompt,
     ai_model: "latest",
     should_remesh: true,
     topology: input.settings.topology,
+    target_polycount: input.settings.targetPolycount,
   };
 
-  const data = await fetchMeshy("/text-to-3d", {
+  const data = await fetchMeshy("/openapi/v2/text-to-3d", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -218,7 +241,7 @@ async function createMeshyTextTask(
   const providerTaskId = extractTaskId(data);
 
   if (!providerTaskId) {
-    throw new Error("第三方 AI 服务未返回文本任务 ID。");
+    throw new Error("Third-party AI service did not return a text task ID.");
   }
 
   return {
@@ -227,12 +250,12 @@ async function createMeshyTextTask(
     providerTaskFlow: "text-preview",
     status: "queued",
     progress: 8,
-    stage: "文字任务已提交，正在生成 3D 草模",
+    stage: "Text task submitted. Generating 3D preview.",
   };
 }
 
 async function syncMeshyImageTask(task: TaskRecord): Promise<ProviderSyncResult> {
-  const data = await fetchMeshy(`/image-to-3d/${task.providerTaskId}`, {
+  const data = await fetchMeshy(`/openapi/v1/image-to-3d/${task.providerTaskId}`, {
     method: "GET",
   });
 
@@ -251,7 +274,7 @@ async function syncMeshyImageTask(task: TaskRecord): Promise<ProviderSyncResult>
         ? taskError.message
         : typeof data.message === "string"
           ? data.message
-          : "第三方模型生成失败。"
+          : "Third-party model generation failed."
       : undefined;
 
   return {
@@ -269,7 +292,7 @@ async function syncMeshyImageTask(task: TaskRecord): Promise<ProviderSyncResult>
 
 async function syncMeshyTextTask(task: TaskRecord): Promise<ProviderSyncResult> {
   const flow = task.providerTaskFlow ?? "text-preview";
-  const data = await fetchMeshy(`/text-to-3d/${task.providerTaskId}`, {
+  const data = await fetchMeshy(`/openapi/v2/text-to-3d/${task.providerTaskId}`, {
     method: "GET",
   });
 
@@ -289,24 +312,28 @@ async function syncMeshyTextTask(task: TaskRecord): Promise<ProviderSyncResult> 
   ) {
     const previewTaskId = task.providerTaskId ?? "";
     const refineBody: Record<string, unknown> = {
+      mode: "refine",
       preview_task_id: previewTaskId,
       should_texture: true,
       should_remesh: true,
+      enable_pbr: true,
       target_formats: task.settings.targetFormats,
+      ai_model: "latest",
+      topology: task.settings.topology,
     };
 
     if (task.settings.texturePrompt.trim()) {
       refineBody.texture_prompt = task.settings.texturePrompt.trim();
     }
 
-    const refineData = await fetchMeshy("/text-to-3d", {
+    const refineData = await fetchMeshy("/openapi/v2/text-to-3d", {
       method: "POST",
       body: JSON.stringify(refineBody),
     });
     const refineTaskId = extractTaskId(refineData);
 
     if (!refineTaskId) {
-      throw new Error("Meshy 细化任务创建失败。");
+      throw new Error("Failed to create Meshy refine task.");
     }
 
     return {
@@ -316,7 +343,7 @@ async function syncMeshyTextTask(task: TaskRecord): Promise<ProviderSyncResult> 
       providerTaskFlow: "text-refine",
       status: "processing",
       progress: 55,
-      stage: "草模已完成，正在细化并生成可下载模型",
+      stage: "Preview completed. Refining and preparing downloadable model.",
       result,
       raw: refineData,
     };
@@ -328,7 +355,7 @@ async function syncMeshyTextTask(task: TaskRecord): Promise<ProviderSyncResult> 
         ? taskError.message
         : typeof data.message === "string"
           ? data.message
-          : "第三方模型生成失败。"
+          : "Third-party model generation failed."
       : undefined;
 
   return {
@@ -355,8 +382,8 @@ function createMockTask(input: ProviderCreateInput): ProviderSyncResult {
     progress: 6,
     stage:
       input.inputMode === "text"
-        ? "Mock 文本模式已启动，准备生成演示模型"
-        : "Mock 图片模式已启动，准备生成演示模型",
+        ? "Mock text mode started. Preparing demo model."
+        : "Mock text mode started. Preparing demo model.",
   };
 }
 
@@ -370,7 +397,7 @@ function syncMockTask(task: TaskRecord): ProviderSyncResult {
       providerTaskFlow: task.providerTaskFlow,
       status: "queued",
       progress: 12,
-      stage: "Mock 队列中",
+      stage: "Mock task queued.",
     };
   }
 
@@ -396,7 +423,7 @@ function syncMockTask(task: TaskRecord): ProviderSyncResult {
     providerTaskFlow: task.providerTaskFlow,
     status: "succeeded",
     progress: 100,
-    stage: "Mock 模型已准备完成",
+    stage: "Mock model is ready.",
     result: {
       thumbnailUrl: "/demo/mock-preview.svg",
       primaryModelUrl: "/demo/mock-model.gltf",

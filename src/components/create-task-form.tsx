@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 
+import { parseJsonResponse } from "@/lib/http";
+
 type InputMode = "image" | "text";
 
 export function CreateTaskForm() {
@@ -76,7 +78,9 @@ export function CreateTaskForm() {
         method: "POST",
         body: formData,
       });
-      const payload = (await response.json()) as
+      const payload = (await parseJsonResponse<{
+        task: { id: string };
+      }>(response)) as
         | { task: { id: string } }
         | { error: string };
 

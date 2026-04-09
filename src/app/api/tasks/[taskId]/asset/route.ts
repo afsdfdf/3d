@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { readTask } from "@/lib/storage";
+import { readStoredBinary, readTask } from "@/lib/storage";
 import type { OutputFormat, TaskRecord } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -29,7 +29,7 @@ function getLocalPublicPath(assetUrl: string) {
   const resolved = path.join(publicRoot, normalized);
 
   if (!resolved.startsWith(publicRoot)) {
-    throw new Error("本地资源路径非法。");
+    throw new Error("Invalid local asset path.");
   }
 
   return resolved;
@@ -59,7 +59,7 @@ export async function GET(
   const task = await readTask(taskId);
 
   if (!task) {
-    return NextResponse.json({ error: "任务不存在。" }, { status: 404 });
+    return NextResponse.json({ error: "Task not found." }, { status: 404 });
   }
 
   const kindParam = request.nextUrl.searchParams.get("kind");
@@ -70,14 +70,32 @@ export async function GET(
   const assetUrl = pickAssetUrl(task, kind, requestedFormat ?? undefined);
 
   if (!assetUrl) {
-    return NextResponse.json({ error: "当前任务没有可预览资源。" }, { status: 404 });
+    return NextResponse.json({ error: "Preview asset not found." }, { status: 404 });
   }
 
   if (assetUrl.startsWith("/")) {
-    const filePath =
-      assetUrl === task.sourceImageUrl && task.sourceImagePath
-        ? task.sourceImagePath
-        : getLocalPublicPath(assetUrl);
+    if (assetUrl === task.sourceImageUrl && task.sourceImageBlobPath) {
+      const source = await readStoredBinary(task.sourceImageBlobPath);
+
+      if (!source) {
+        return NextResponse.json({ error: "Preview asset not found." }, { status: 404 });
+      }
+
+      const extension =
+        path.extname(task.sourceImageBlobPath).replace(".", "") || "bin";
+
+      return new NextResponse(source.buffer, {
+        headers: {
+          "Content-Type":
+            source.contentType ??
+            CONTENT_TYPES[extension] ??
+            "application/octet-stream",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    const filePath = getLocalPublicPath(assetUrl);
     const fileBuffer = await readFile(filePath);
     const extension = path.extname(filePath).replace(".", "") || "bin";
 
@@ -92,7 +110,10 @@ export async function GET(
   const upstream = await fetch(assetUrl, { cache: "no-store" });
 
   if (!upstream.ok) {
-    return NextResponse.json({ error: "获取远程预览资源失败。" }, { status: 502 });
+    return NextResponse.json(
+      { error: "Failed to fetch remote preview asset." },
+      { status: 502 },
+    );
   }
 
   const remoteExtension =

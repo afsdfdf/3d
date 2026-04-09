@@ -14,6 +14,7 @@ import {
 import { motion } from "motion/react";
 
 import { ModelViewerCanvas } from "@/components/model-viewer";
+import { parseJsonResponse } from "@/lib/http";
 import type { LocalTaskStatus, PublicTask } from "@/lib/types";
 
 const statusMeta: Record<
@@ -95,7 +96,9 @@ export function TaskView({ initialTask }: { initialTask: PublicTask }) {
       const response = await fetch(`/api/tasks/${task.id}`, {
         cache: "no-store",
       });
-      const payload = (await response.json()) as
+      const payload = (await parseJsonResponse<{
+        task: PublicTask;
+      }>(response)) as
         | { task: PublicTask }
         | { error: string };
 

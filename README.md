@@ -86,3 +86,12 @@ src/
 - 多结果版本管理
 - 支持更多 3D 输出格式
 - 接入对象存储（S3 / R2）
+
+## Vercel deployment note
+
+For Vercel, the project uses **Vercel Blob** as persistent storage when `BLOB_READ_WRITE_TOKEN` is configured.
+
+- uploaded source images are stored in Blob
+- task JSON records are stored in Blob
+- local development without Blob still falls back to `.runtime`
+- this app still requires the Node.js runtime and should not be deployed as static export only

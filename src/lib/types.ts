@@ -45,14 +45,14 @@ export interface TaskRecord {
   lastProviderSyncAt?: string;
   sourceFileName: string;
   sourceMimeType?: string;
-  sourceImagePath?: string;
+  sourceImageBlobPath?: string;
   sourceImageUrl?: string;
   settings: GenerateSettings;
   errorMessage?: string;
   result: TaskResultAssets;
 }
 
-export type PublicTask = Omit<TaskRecord, "sourceImagePath">;
+export type PublicTask = Omit<TaskRecord, "sourceImageBlobPath">;
 
 export interface ProviderCreateInput {
   localTaskId: string;

@@ -9,14 +9,21 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ taskId: string }> },
 ) {
-  const { taskId } = await context.params;
-  const existing = await getTask(taskId);
+  try {
+    const { taskId } = await context.params;
+    const existing = await getTask(taskId);
 
-  if (!existing) {
-    return NextResponse.json({ error: "任务不存在。" }, { status: 404 });
+    if (!existing) {
+      return NextResponse.json({ error: "Task not found." }, { status: 404 });
+    }
+
+    const task = await refreshTask(taskId, { force: true });
+
+    return NextResponse.json({ task: task ?? existing }, { status: 200 });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to read task details.";
+
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const task = await refreshTask(taskId, { force: true });
-
-  return NextResponse.json({ task: task ?? existing }, { status: 200 });
 }

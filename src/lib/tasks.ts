@@ -77,7 +77,7 @@ export async function createTask(
       updatedAt: createdAt,
       sourceFileName: image.name,
       sourceMimeType: image.type,
-      sourceImagePath: upload.sourceImagePath,
+      sourceImageBlobPath: upload.sourceImageBlobPath,
       sourceImageUrl: upload.sourceImageUrl,
       settings: input.settings,
       result: {

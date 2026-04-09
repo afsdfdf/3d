@@ -1,8 +1,6 @@
-import { readFile } from "node:fs/promises";
-
 import { NextResponse } from "next/server";
 
-import { readTask } from "@/lib/storage";
+import { readStoredBinary, readTask } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,18 +13,22 @@ export async function GET(
   const task = await readTask(taskId);
 
   if (!task) {
-    return NextResponse.json({ error: "任务不存在。" }, { status: 404 });
+    return NextResponse.json({ error: "Task not found." }, { status: 404 });
   }
 
-  if (!task.sourceImagePath || !task.sourceMimeType) {
-    return NextResponse.json({ error: "该任务没有源图片。" }, { status: 404 });
+  if (!task.sourceImageBlobPath || !task.sourceMimeType) {
+    return NextResponse.json({ error: "Source image not found." }, { status: 404 });
   }
 
-  const fileBuffer = await readFile(task.sourceImagePath);
+  const source = await readStoredBinary(task.sourceImageBlobPath);
 
-  return new NextResponse(fileBuffer, {
+  if (!source) {
+    return NextResponse.json({ error: "Source image not found." }, { status: 404 });
+  }
+
+  return new NextResponse(source.buffer, {
     headers: {
-      "Content-Type": task.sourceMimeType,
+      "Content-Type": source.contentType ?? task.sourceMimeType,
       "Cache-Control": "no-store",
     },
   });
