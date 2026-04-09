@@ -15,7 +15,7 @@ import type {
   PublicTask,
   TaskRecord,
 } from "@/lib/types";
-import { bufferToDataUri, clamp } from "@/lib/utils";
+import { bufferToDataUri, clamp, formatPromptLabel } from "@/lib/utils";
 
 function isTerminal(status: LocalTaskStatus) {
   return status === "succeeded" || status === "failed" || status === "timeout";
@@ -37,40 +37,122 @@ function mergeTask(task: TaskRecord, patch: Partial<TaskRecord>) {
 }
 
 export async function createTask(
-  image: File,
-  settings: GenerateSettings,
+  input:
+    | { inputMode: "image"; image: File; settings: GenerateSettings }
+    | { inputMode: "text"; prompt: string; settings: GenerateSettings },
 ): Promise<PublicTask> {
-  if (!image.type.startsWith("image/")) {
-    throw new Error("仅支持图片文件上传。");
-  }
-
-  if (image.size > env.maxUploadBytes) {
-    throw new Error(`上传图片不能超过 ${Math.round(env.maxUploadBytes / 1024 / 1024)}MB。`);
-  }
-
   const taskId = nanoid(12);
   const createdAt = new Date().toISOString();
-  const fileBuffer = Buffer.from(await image.arrayBuffer());
-  const upload = await saveUploadFile({
-    taskId,
-    fileName: image.name,
-    mimeType: image.type,
-    buffer: fileBuffer,
-  });
+  let task: TaskRecord;
 
-  let task: TaskRecord = {
+  if (input.inputMode === "image") {
+    const image = input.image;
+
+    if (!image.type.startsWith("image/")) {
+      throw new Error("仅支持图片文件上传。");
+    }
+
+    if (image.size > env.maxUploadBytes) {
+      throw new Error(
+        `上传图片不能超过 ${Math.round(env.maxUploadBytes / 1024 / 1024)}MB。`,
+      );
+    }
+
+    const fileBuffer = Buffer.from(await image.arrayBuffer());
+    const upload = await saveUploadFile({
+      taskId,
+      fileName: image.name,
+      mimeType: image.type,
+      buffer: fileBuffer,
+    });
+
+    task = {
+      id: taskId,
+      provider: env.provider,
+      inputMode: "image",
+      status: "uploading",
+      progress: 4,
+      stage: "图片上传完成，准备提交生成任务",
+      createdAt,
+      updatedAt: createdAt,
+      sourceFileName: image.name,
+      sourceMimeType: image.type,
+      sourceImagePath: upload.sourceImagePath,
+      sourceImageUrl: upload.sourceImageUrl,
+      settings: input.settings,
+      result: {
+        modelUrls: {},
+      },
+    };
+
+    await writeTask(task);
+
+    try {
+      const providerResult = await createProviderTask({
+        localTaskId: taskId,
+        inputMode: "image",
+        sourceFileName: image.name,
+        sourceMimeType: image.type,
+        sourceImageUrl: upload.sourceImageUrl,
+        sourceDataUri: bufferToDataUri(fileBuffer, image.type),
+        settings: input.settings,
+        createdAt,
+      });
+
+      task = mergeTask(task, {
+        provider: providerResult.provider,
+        providerTaskId: providerResult.providerTaskId,
+        providerTaskFlow: providerResult.providerTaskFlow,
+        previewTaskId: providerResult.previewTaskId,
+        status: providerResult.status,
+        progress: clamp(providerResult.progress, 0, 100),
+        stage: providerResult.stage,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastProviderSyncAt: new Date().toISOString(),
+        errorMessage: providerResult.errorMessage,
+        result: providerResult.result,
+        finishedAt:
+          providerResult.status === "succeeded" ||
+          providerResult.status === "failed"
+            ? new Date().toISOString()
+            : undefined,
+      });
+
+      await writeTask(task);
+      return toPublicTask(task);
+    } catch (error) {
+      task = mergeTask(task, {
+        status: "failed",
+        progress: 100,
+        stage: "提交第三方任务失败",
+        updatedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        errorMessage:
+          error instanceof Error ? error.message : "提交第三方任务失败，请稍后重试。",
+      });
+      await writeTask(task);
+      return toPublicTask(task);
+    }
+  }
+
+  const prompt = input.prompt.trim();
+  if (!prompt) {
+    throw new Error("请输入文字描述。");
+  }
+
+  task = {
     id: taskId,
     provider: env.provider,
-    status: "uploading",
+    inputMode: "text",
+    prompt,
+    status: "queued",
     progress: 4,
-    stage: "图片上传完成，准备提交生成任务",
+    stage: "文字提示词已提交，准备创建生成任务",
     createdAt,
     updatedAt: createdAt,
-    sourceFileName: image.name,
-    sourceMimeType: image.type,
-    sourceImagePath: upload.sourceImagePath,
-    sourceImageUrl: upload.sourceImageUrl,
-    settings,
+    sourceFileName: formatPromptLabel(prompt),
+    settings: input.settings,
     result: {
       modelUrls: {},
     },
@@ -81,17 +163,17 @@ export async function createTask(
   try {
     const providerResult = await createProviderTask({
       localTaskId: taskId,
-      sourceFileName: image.name,
-      sourceMimeType: image.type,
-      sourceImageUrl: upload.sourceImageUrl,
-      sourceDataUri: bufferToDataUri(fileBuffer, image.type),
-      settings,
+      inputMode: "text",
+      prompt,
+      settings: input.settings,
       createdAt,
     });
 
     task = mergeTask(task, {
       provider: providerResult.provider,
       providerTaskId: providerResult.providerTaskId,
+      providerTaskFlow: providerResult.providerTaskFlow,
+      previewTaskId: providerResult.previewTaskId,
       status: providerResult.status,
       progress: clamp(providerResult.progress, 0, 100),
       stage: providerResult.stage,
@@ -101,7 +183,8 @@ export async function createTask(
       errorMessage: providerResult.errorMessage,
       result: providerResult.result,
       finishedAt:
-        providerResult.status === "succeeded" || providerResult.status === "failed"
+        providerResult.status === "succeeded" ||
+        providerResult.status === "failed"
           ? new Date().toISOString()
           : undefined,
     });
@@ -170,6 +253,8 @@ export async function refreshTask(
   const updated = mergeTask(existing, {
     provider: providerResult.provider,
     providerTaskId: providerResult.providerTaskId,
+    providerTaskFlow: providerResult.providerTaskFlow,
+    previewTaskId: providerResult.previewTaskId ?? existing.previewTaskId,
     status: providerResult.status,
     progress: clamp(providerResult.progress, 0, 100),
     stage: providerResult.stage,

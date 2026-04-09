@@ -18,6 +18,10 @@ export async function GET(
     return NextResponse.json({ error: "任务不存在。" }, { status: 404 });
   }
 
+  if (!task.sourceImagePath || !task.sourceMimeType) {
+    return NextResponse.json({ error: "该任务没有源图片。" }, { status: 404 });
+  }
+
   const fileBuffer = await readFile(task.sourceImagePath);
 
   return new NextResponse(fileBuffer, {

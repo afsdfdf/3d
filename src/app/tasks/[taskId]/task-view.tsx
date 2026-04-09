@@ -129,7 +129,8 @@ export function TaskView({ initialTask }: { initialTask: PublicTask }) {
   const StatusIcon = meta.icon;
   const modelAsset = getModelAsset(task);
   const canShow3d = Boolean(modelAsset);
-  const canDownload = canShow3d || Boolean(task.result.thumbnailUrl);
+  const canDownload =
+    canShow3d || Boolean(task.result.thumbnailUrl) || Boolean(task.sourceImageUrl);
   const previewImage = getPreviewImage(task);
 
   return (
@@ -236,6 +237,20 @@ export function TaskView({ initialTask }: { initialTask: PublicTask }) {
               <dt>任务 ID</dt>
               <dd className="font-mono text-xs text-slate-800">{task.id}</dd>
             </div>
+            <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <dt>输入方式</dt>
+              <dd className="text-slate-800">
+                {task.inputMode === "text" ? "文字生成" : "图片生成"}
+              </dd>
+            </div>
+            {task.inputMode === "text" && task.prompt && (
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+                <dt>文字描述</dt>
+                <dd className="max-w-[220px] text-right text-slate-800">
+                  {task.prompt}
+                </dd>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
               <dt>第三方 Provider</dt>
               <dd className="uppercase text-slate-800">{task.provider}</dd>

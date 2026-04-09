@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { createTask, listTasks } from "@/lib/tasks";
-import { parseSettingsFromFormData } from "@/lib/utils";
+import {
+  parseInputMode,
+  parseSettingsFromFormData,
+} from "@/lib/utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,17 +22,30 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    const image = formData.get("image");
-
-    if (!(image instanceof File)) {
-      return NextResponse.json(
-        { error: "请先选择一张图片。" },
-        { status: 400 },
-      );
-    }
-
+    const inputMode = parseInputMode(formData);
     const settings = parseSettingsFromFormData(formData);
-    const task = await createTask(image, settings);
+
+    const task =
+      inputMode === "text"
+        ? await createTask({
+            inputMode: "text",
+            prompt:
+              typeof formData.get("prompt") === "string"
+                ? String(formData.get("prompt"))
+                : "",
+            settings,
+          })
+        : await createTask({
+            inputMode: "image",
+            image: (() => {
+              const image = formData.get("image");
+              if (!(image instanceof File)) {
+                throw new Error("请先选择一张图片。");
+              }
+              return image;
+            })(),
+            settings,
+          });
 
     return NextResponse.json({ task }, { status: 202 });
   } catch (error) {

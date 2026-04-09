@@ -4,6 +4,7 @@ import type {
   GenerateSettings,
   OutputFormat,
   QualityPreset,
+  TaskInputMode,
   TopologyMode,
 } from "@/lib/types";
 
@@ -34,6 +35,11 @@ export function extensionFromFile(fileName: string, mimeType: string) {
   }
 }
 
+export function formatPromptLabel(prompt: string) {
+  const normalized = prompt.replace(/\s+/g, " ").trim();
+  return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;
+}
+
 export function parseSettingsFromFormData(formData: FormData): GenerateSettings {
   const qualityRaw = formData.get("quality");
   const topologyRaw = formData.get("topology");
@@ -58,4 +64,8 @@ export function parseSettingsFromFormData(formData: FormData): GenerateSettings 
     targetPolycount,
     targetFormats,
   };
+}
+
+export function parseInputMode(formData: FormData): TaskInputMode {
+  return formData.get("inputMode") === "text" ? "text" : "image";
 }

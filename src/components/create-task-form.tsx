@@ -2,12 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ImagePlus, LoaderCircle, Sparkles } from "lucide-react";
+import {
+  ImagePlus,
+  LoaderCircle,
+  Sparkles,
+  Type,
+} from "lucide-react";
 import { motion } from "motion/react";
+
+type InputMode = "image" | "text";
 
 export function CreateTaskForm() {
   const router = useRouter();
+  const [inputMode, setInputMode] = useState<InputMode>("image");
   const [file, setFile] = useState<File | null>(null);
+  const [prompt, setPrompt] = useState("");
   const [quality, setQuality] = useState<"draft" | "production">("production");
   const [topology, setTopology] = useState<"triangle" | "quad">("quad");
   const [shouldTexture, setShouldTexture] = useState(true);
@@ -34,8 +43,13 @@ export function CreateTaskForm() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!file) {
+    if (inputMode === "image" && !file) {
       setError("请先上传一张图片。");
+      return;
+    }
+
+    if (inputMode === "text" && !prompt.trim()) {
+      setError("请输入文字描述。");
       return;
     }
 
@@ -44,11 +58,19 @@ export function CreateTaskForm() {
 
     try {
       const formData = new FormData();
-      formData.append("image", file);
+      formData.append("inputMode", inputMode);
       formData.append("quality", quality);
       formData.append("topology", topology);
       formData.append("shouldTexture", String(shouldTexture));
       formData.append("texturePrompt", texturePrompt.trim());
+
+      if (inputMode === "image" && file) {
+        formData.append("image", file);
+      }
+
+      if (inputMode === "text") {
+        formData.append("prompt", prompt.trim());
+      }
 
       const response = await fetch("/api/tasks", {
         method: "POST",
@@ -83,60 +105,98 @@ export function CreateTaskForm() {
       <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top,rgba(143,212,255,0.3),transparent_62%)]" />
 
       <div className="relative">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.24em] text-sky-700">
-              <Sparkles className="size-3.5" />
-              Create Task
-            </div>
-            <h2 className="mt-4 text-2xl font-semibold tracking-[-0.04em] text-slate-900">
-              上传图片并开始生成
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              保留最必要的参数。提交后会生成任务详情页，同时首页任务中心也会保留进度。
-            </p>
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.24em] text-sky-700">
+            <Sparkles className="size-3.5" />
+            Create Task
           </div>
+          <h2 className="mt-4 text-2xl font-semibold tracking-[-0.04em] text-slate-900">
+            支持文字和图片生成
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            可以上传参考图生成 3D，也可以直接输入文字描述生成 3D。
+          </p>
+        </div>
+
+        <div className="mt-6 inline-flex rounded-full border border-slate-200 bg-white/88 p-1">
+          <button
+            type="button"
+            onClick={() => setInputMode("image")}
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
+              inputMode === "image"
+                ? "bg-[linear-gradient(135deg,#8fd4ff,#5aa6ff)] text-white shadow-sm"
+                : "text-slate-600"
+            }`}
+          >
+            <ImagePlus className="size-4" />
+            图片生成
+          </button>
+          <button
+            type="button"
+            onClick={() => setInputMode("text")}
+            className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
+              inputMode === "text"
+                ? "bg-[linear-gradient(135deg,#8fd4ff,#5aa6ff)] text-white shadow-sm"
+                : "text-slate-600"
+            }`}
+          >
+            <Type className="size-4" />
+            文字生成
+          </button>
         </div>
 
         <div className="mt-6 space-y-5">
-          <label className="group block cursor-pointer overflow-hidden rounded-[28px] border border-dashed border-slate-200 bg-white/78 transition hover:border-sky-300 hover:bg-white">
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/jpg,image/webp"
-              className="sr-only"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            />
-            <div className="relative aspect-[16/10] min-h-[250px] overflow-hidden">
-              {previewUrl ? (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={previewUrl}
-                    alt="Upload preview"
-                    className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.02]"
-                  />
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white via-white/85 to-transparent p-5">
-                    <p className="text-sm font-semibold text-slate-800">{file?.name}</p>
-                    <p className="mt-1 text-sm text-slate-500">点击重新选择图片</p>
+          {inputMode === "image" ? (
+            <label className="group block cursor-pointer overflow-hidden rounded-[28px] border border-dashed border-slate-200 bg-white/78 transition hover:border-sky-300 hover:bg-white">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
+                className="sr-only"
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              />
+              <div className="relative aspect-[16/10] min-h-[250px] overflow-hidden">
+                {previewUrl ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={previewUrl}
+                      alt="Upload preview"
+                      className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.02]"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white via-white/85 to-transparent p-5">
+                      <p className="text-sm font-semibold text-slate-800">{file?.name}</p>
+                      <p className="mt-1 text-sm text-slate-500">点击重新选择图片</p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+                    <div className="rounded-full bg-[linear-gradient(135deg,#e7f5ff,#f2f6ff)] p-4 text-sky-700">
+                      <ImagePlus className="size-8" />
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold text-slate-900">
+                        拖入或点击上传一张图片
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-slate-500">
+                        推荐主体清晰、背景干净的参考图，支持 PNG / JPG / WEBP。
+                      </p>
+                    </div>
                   </div>
-                </>
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-                  <div className="rounded-full bg-[linear-gradient(135deg,#e7f5ff,#f2f6ff)] p-4 text-sky-700">
-                    <ImagePlus className="size-8" />
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold text-slate-900">
-                      拖入或点击上传一张图片
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-slate-500">
-                      推荐主体清晰、背景干净的参考图，支持 PNG / JPG / WEBP。
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </label>
+                )}
+              </div>
+            </label>
+          ) : (
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-slate-600">文字描述</span>
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="例如：a cute ceramic astronaut toy, glossy white helmet, soft blue accents, studio product render"
+                rows={6}
+                className="soft-input w-full rounded-[24px] px-4 py-4"
+              />
+            </label>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-2">
@@ -180,7 +240,7 @@ export function CreateTaskForm() {
                 生成纹理
               </span>
               <span className="mt-1 block text-sm leading-6 text-slate-500">
-                开启后会同时尝试生成更适合预览和下载的纹理表现。
+                文字模式下会先生成草模，再自动细化成带纹理的 3D 模型。
               </span>
             </span>
           </label>
@@ -192,7 +252,7 @@ export function CreateTaskForm() {
             <textarea
               value={texturePrompt}
               onChange={(event) => setTexturePrompt(event.target.value)}
-              placeholder="例如：clean ceramic toy, soft blue glaze, product studio lighting"
+              placeholder="例如：clean ceramic, premium toy finish, product studio lighting"
               rows={4}
               className="soft-input w-full rounded-[22px] px-4 py-3"
             />

@@ -41,7 +41,7 @@ function pickAssetUrl(
   format?: OutputFormat,
 ) {
   if (kind === "thumbnail") {
-    return task.result.thumbnailUrl || task.sourceImageUrl;
+    return task.result.thumbnailUrl || task.sourceImageUrl || null;
   }
 
   if (format && task.result.modelUrls[format]) {
@@ -75,7 +75,7 @@ export async function GET(
 
   if (assetUrl.startsWith("/")) {
     const filePath =
-      assetUrl === task.sourceImageUrl
+      assetUrl === task.sourceImageUrl && task.sourceImagePath
         ? task.sourceImagePath
         : getLocalPublicPath(assetUrl);
     const fileBuffer = await readFile(filePath);
